@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import ProductManager from "../components/ProductManager";
-import { addSale } from "../data/salesStore";
+import { addSale, getSales } from "../data/salesStore";
 
 const STORAGE_KEY = "tlatasch_products";
 
@@ -33,6 +33,7 @@ export default function POS() {
   const [discountPercent, setDiscountPercent] = useState(0);
   const [showProductManager, setShowProductManager] = useState(false);
 
+  // Load products
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -47,29 +48,32 @@ export default function POS() {
     }
   }, []);
 
+  // Persist products
   useEffect(() => {
     if (products && products.length >= 0) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
     }
   }, [products]);
 
+  // Function buttons (Demo + ChangePayment entfernt)
   const functionButtons = [
     { label: "Products: Add / Edit / Delete", action: "manageProducts" },
     { label: "Open Reports", action: "openReports" },
-    { label: "💾 Add Demo Sale", action: "demoSale" },
-    { label: "Change Payment Method", action: "changePayment" },
     { label: "Show Daily Revenue", action: "dailyRevenue" },
     { label: "Reprint Last Receipt", action: "reprintReceipt" },
   ];
 
+  // CRUD hooks
   const addProduct = (p) => setProducts((prev) => [...prev, p]);
   const updateProduct = (p) => setProducts((prev) => prev.map((x) => (x.id === p.id ? p : x)));
   const deleteProduct = (id) => setProducts((prev) => prev.filter((x) => x.id !== id));
 
+  // Visible products
   const visibleProducts = products.filter(
     (p) => p.category === activeCategory && p.active !== false
   );
 
+  // Cart actions
   const handleProductClick = (product) => {
     const exists = cart.find((i) => i.id === product.id);
     if (exists) {
@@ -78,52 +82,76 @@ export default function POS() {
       setCart([...cart, { id: product.id, name: product.name, price: product.price, quantity: 1 }]);
     }
   };
-
   const handleIncrement = (id) =>
     setCart(cart.map((i) => (i.id === id ? { ...i, quantity: i.quantity + 1 } : i)));
-
   const handleDecrement = (id) =>
     setCart(
       cart
         .map((i) => (i.id === id ? { ...i, quantity: Math.max(0, i.quantity - 1) } : i))
         .filter((i) => i.quantity > 0)
     );
-
   const handleRemoveItem = (id) => setCart(cart.filter((i) => i.id !== id));
 
+  // Totals
   const subtotal = cart.reduce((s, i) => s + i.price * i.quantity, 0);
   const discountValue = subtotal * discountPercent;
-  const totalWithDiscount = Math.max(0, subtotal - discountValue).toFixed(2);
+  const totalWithDiscount = Math.max(0, subtotal - discountValue);
 
+  // Close manager if leaving Functions
   useEffect(() => {
     if (activeCategory !== "Functions" && showProductManager) {
       setShowProductManager(false);
     }
   }, [activeCategory, showProductManager]);
 
-  // 🔹 Demo-Sale Funktion
-  const addDemoSale = () => {
-    addSale({
+  // Payment
+  const handlePayment = (method) => {
+    if (cart.length === 0) {
+      alert("Cart is empty!");
+      return;
+    }
+    const sale = {
       timestamp: Date.now(),
-      cashierPin: "000001",
-      payment: "CASH",
-      items: [
-        { id: "p1", name: "Chapati Normal", price: 7, qty: 2 },
-        { id: "p7", name: "Cola", price: 2.5, qty: 1 },
-      ],
-      subtotal: 16.5,
-      discountPercent: 0.1,
-      discountValue: 1.65,
-      total: 14.85,
-    });
-    alert("Demo-Sale gespeichert. Öffne Reports!");
+      cashierPin: "000001", // TODO: dynamisch aus Login
+      payment: method,
+      items: cart.map((i) => ({
+        id: i.id,
+        name: i.name,
+        price: i.price,
+        qty: i.quantity,
+      })),
+      subtotal,
+      discountPercent,
+      discountValue,
+      total: totalWithDiscount,
+    };
+    addSale(sale);
+    setCart([]);
+    setDiscountPercent(0);
+    navigate("/receipt", { state: { sale } });
+  };
+
+  // Clear cart helper
+  const handleClearCart = () => {
+    setCart([]);
+    setDiscountPercent(0);
+  };
+
+  // Reprint last receipt
+  const handleReprintLastReceipt = () => {
+    const sale = getSales()[0] || null; // neuester Sale
+    if (!sale) {
+      alert("No previous receipt found.");
+      return;
+    }
+    navigate("/receipt", { state: { sale } });
   };
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-neutral-950 text-gray-100">
       <div className="h-full p-4">
         <div className="h-full flex gap-4">
-          {/* LEFT: Products / Functions */}
+          {/* LEFT */}
           <section className="flex-1 min-w-0 rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-4 shadow-xl flex flex-col">
             {/* Tabs */}
             <div className="flex flex-wrap gap-2">
@@ -133,10 +161,11 @@ export default function POS() {
                   <button
                     key={cat}
                     onClick={() => setActiveCategory(cat)}
-                    className={`px-4 py-2 rounded-xl font-medium transition border
-                      ${active
+                    className={`px-4 py-2 rounded-xl font-medium transition border ${
+                      active
                         ? "border-emerald-400 text-emerald-300 bg-emerald-400/10"
-                        : "border-white/15 hover:bg-white/10"}`}
+                        : "border-white/15 hover:bg-white/10"
+                    }`}
                   >
                     {cat}
                   </button>
@@ -173,18 +202,13 @@ export default function POS() {
                       <button
                         key={btn.action}
                         onClick={() => {
-                          if (btn.action === "manageProducts") {
-                            setShowProductManager(true);
-                          } else if (btn.action === "openReports") {
-                            navigate("/reports");
-                          } else if (btn.action === "demoSale") {
-                            addDemoSale(); // jetzt richtig eingebaut
-                          } else {
-                            console.log("Function:", btn.action);
-                          }
+                          if (btn.action === "manageProducts") setShowProductManager(true);
+                          else if (btn.action === "openReports") navigate("/reports");
+                          else if (btn.action === "reprintReceipt") handleReprintLastReceipt();
+                          else if (btn.action === "dailyRevenue") console.log("Daily revenue…");
+                          else console.log("Function:", btn.action);
                         }}
-                        className="h-16 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10
-                                   px-4 text-left font-medium shadow transition"
+                        className="h-16 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 text-left font-medium shadow transition"
                       >
                         {btn.label}
                       </button>
@@ -197,8 +221,7 @@ export default function POS() {
                     <button
                       key={product.id}
                       onClick={() => handleProductClick(product)}
-                      className="group h-24 text-left rounded-2xl border border-white/10
-                                 bg-white/5 hover:bg-white/10 p-3 shadow transition hover:-translate-y-0.5"
+                      className="group h-24 text-left rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 p-3 shadow transition hover:-translate-y-0.5"
                     >
                       <div className="font-semibold leading-tight truncate">{product.name}</div>
                       <div className="text-sm opacity-80 mt-1">{product.price.toFixed(2)} TND</div>
@@ -219,6 +242,7 @@ export default function POS() {
               <h2 className="text-xl font-bold">Cart</h2>
             </div>
 
+            {/* Items */}
             <div className="space-y-2 overflow-auto pr-1" style={{ maxHeight: "calc(100vh - 240px)" }}>
               {cart.length === 0 && <p className="text-sm text-gray-400">Cart is empty.</p>}
               {cart.map((item) => (
@@ -251,6 +275,7 @@ export default function POS() {
                     <button
                       onClick={() => handleRemoveItem(item.id)}
                       className="px-2 h-8 text-xs rounded-full border border-rose-400/40 text-rose-300 hover:bg-rose-500/10"
+                      title="Remove"
                     >
                       ✕
                     </button>
@@ -305,13 +330,30 @@ export default function POS() {
                 </div>
                 <div className="flex justify-between text-base font-semibold pt-2 border-t border-white/10">
                   <span>Total</span>
-                  <span>{totalWithDiscount} TND</span>
+                  <span>{totalWithDiscount.toFixed(2)} TND</span>
                 </div>
               </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button className="py-2 rounded-xl border border-white/15 hover:bg-white/10">CASH</button>
-                <button className="py-2 rounded-xl border border-white/15 hover:bg-white/10">CARD</button>
+              {/* Actions: Clear + Payment */}
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <button
+                  onClick={handleClearCart}
+                  className="py-2 rounded-xl border border-rose-400/40 text-rose-300 hover:bg-rose-500/10"
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={() => handlePayment("CASH")}
+                  className="py-2 rounded-xl border border-white/15 hover:bg-white/10"
+                >
+                  CASH
+                </button>
+                <button
+                  onClick={() => handlePayment("CARD")}
+                  className="py-2 rounded-xl border border-white/15 hover:bg-white/10"
+                >
+                  CARD
+                </button>
               </div>
             </div>
           </aside>
@@ -320,3 +362,5 @@ export default function POS() {
     </div>
   );
 }
+
+
