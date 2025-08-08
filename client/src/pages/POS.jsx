@@ -1,10 +1,11 @@
 // src/pages/POS.jsx
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import ProductManager from "../components/ProductManager";
 import { addSale, getSales } from "../data/salesStore";
 
-const STORAGE_KEY = "tlatasch_products";
+const STORAGE_PRODUCTS = "tlatasch_products";
+const STORAGE_CATEGORIES = "tlatasch_categories";
 
 const DEFAULT_PRODUCTS = [
   { id: "p1", name: "Chapati Normal", price: 7, category: "Food", active: true },
@@ -23,19 +24,23 @@ const DEFAULT_PRODUCTS = [
   { id: "p14", name: "Combi 31", price: 113, category: "Menus", active: true },
 ];
 
-const categories = ["Food", "Drinks", "Menus", "Functions"];
-
 export default function POS() {
   const navigate = useNavigate();
-  const [activeCategory, setActiveCategory] = useState("Food");
+  const location = useLocation();
+
   const [products, setProducts] = useState([]);
+  const [baseCategories, setBaseCategories] = useState([]); // ohne "Functions"
+  const [activeCategory, setActiveCategory] = useState("Food");
+
   const [cart, setCart] = useState([]);
   const [discountPercent, setDiscountPercent] = useState(0);
   const [showProductManager, setShowProductManager] = useState(false);
 
+  const cashierPin = localStorage.getItem("cashierPin") || "000001";
+
   // Load products
   useEffect(() => {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_PRODUCTS);
     if (raw) {
       try {
         setProducts(JSON.parse(raw));
@@ -44,29 +49,67 @@ export default function POS() {
       }
     } else {
       setProducts(DEFAULT_PRODUCTS);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_PRODUCTS));
+      localStorage.setItem(STORAGE_PRODUCTS, JSON.stringify(DEFAULT_PRODUCTS));
     }
   }, []);
 
   // Persist products
   useEffect(() => {
-    if (products && products.length >= 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
-    }
+    localStorage.setItem(STORAGE_PRODUCTS, JSON.stringify(products));
   }, [products]);
 
-  // Function buttons (Demo + ChangePayment entfernt)
+  // Load categories
+  useEffect(() => {
+    const raw = localStorage.getItem(STORAGE_CATEGORIES);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length) {
+          setBaseCategories(parsed);
+          if (!parsed.includes(activeCategory) && activeCategory !== "Functions") {
+            setActiveCategory(parsed[0]);
+          }
+          return;
+        }
+      } catch {}
+    }
+    // Fallback defaults
+    const defaults = ["Food", "Drinks", "Menus"];
+    setBaseCategories(defaults);
+    localStorage.setItem(STORAGE_CATEGORIES, JSON.stringify(defaults));
+  }, []);
+
+  // When returning from AdminPanel wanting PM directly
+  useEffect(() => {
+    if (location.state?.openProductManager) {
+      setActiveCategory("Functions");
+      setShowProductManager(true);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location, navigate]);
+
+  // Tabs = categories + Functions
+  const categories = [...baseCategories, "Functions"];
+
   const functionButtons = [
-    { label: "Products: Add / Edit / Delete", action: "manageProducts" },
-    { label: "Open Reports", action: "openReports" },
-    { label: "Show Daily Revenue", action: "dailyRevenue" },
+    { label: "Admin", action: "admin" },
     { label: "Reprint Last Receipt", action: "reprintReceipt" },
   ];
 
-  // CRUD hooks
+  // CRUD
   const addProduct = (p) => setProducts((prev) => [...prev, p]);
   const updateProduct = (p) => setProducts((prev) => prev.map((x) => (x.id === p.id ? p : x)));
   const deleteProduct = (id) => setProducts((prev) => prev.filter((x) => x.id !== id));
+
+  // Categories change (from ProductManager)
+  const handleCategoriesChange = (list) => {
+    setBaseCategories(list);
+    localStorage.setItem(STORAGE_CATEGORIES, JSON.stringify(list));
+    // if current active no longer exists, switch
+    if (!list.includes(activeCategory) && activeCategory !== "Functions") {
+      setActiveCategory(list[0] || "Functions");
+    }
+  };
 
   // Visible products
   const visibleProducts = products.filter(
@@ -97,12 +140,14 @@ export default function POS() {
   const discountValue = subtotal * discountPercent;
   const totalWithDiscount = Math.max(0, subtotal - discountValue);
 
-  // Close manager if leaving Functions
-  useEffect(() => {
-    if (activeCategory !== "Functions" && showProductManager) {
-      setShowProductManager(false);
-    }
-  }, [activeCategory, showProductManager]);
+  // Admin with PIN
+  const requestAdmin = () => {
+    const expected = localStorage.getItem("adminPin") || "999999";
+    const pin = prompt("Enter admin PIN:");
+    if (!pin) return;
+    if (pin === expected) navigate("/admin");
+    else alert("Invalid PIN!");
+  };
 
   // Payment
   const handlePayment = (method) => {
@@ -112,14 +157,9 @@ export default function POS() {
     }
     const sale = {
       timestamp: Date.now(),
-      cashierPin: "000001", // TODO: dynamisch aus Login
+      cashierPin,
       payment: method,
-      items: cart.map((i) => ({
-        id: i.id,
-        name: i.name,
-        price: i.price,
-        qty: i.quantity,
-      })),
+      items: cart.map((i) => ({ id: i.id, name: i.name, price: i.price, qty: i.quantity })),
       subtotal,
       discountPercent,
       discountValue,
@@ -131,28 +171,54 @@ export default function POS() {
     navigate("/receipt", { state: { sale } });
   };
 
-  // Clear cart helper
   const handleClearCart = () => {
     setCart([]);
     setDiscountPercent(0);
   };
 
-  // Reprint last receipt
   const handleReprintLastReceipt = () => {
-    const sale = getSales()[0] || null; // neuester Sale
-    if (!sale) {
-      alert("No previous receipt found.");
-      return;
-    }
+    const sale = getSales()[0] || null;
+    if (!sale) return alert("No previous receipt found.");
     navigate("/receipt", { state: { sale } });
   };
+
+  const handleLogout = () => {
+    setCart([]);
+    setDiscountPercent(0);
+    localStorage.removeItem("cashierPin");
+    navigate("/");
+  };
+
+  // Auto-close PM when leaving Function tab
+  useEffect(() => {
+    if (activeCategory !== "Functions" && showProductManager) setShowProductManager(false);
+  }, [activeCategory, showProductManager]);
+
+  // Hide cart when Product Manager open
+  const showCart = !(activeCategory === "Functions" && showProductManager);
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-neutral-950 text-gray-100">
       <div className="h-full p-4">
-        <div className="h-full flex gap-4">
+        {/* Top bar */}
+        <div className="mb-3 flex items-center justify-between">
+          <h1 className="text-lg font-semibold">TLATASCH POS</h1>
+          <div className="flex items-center gap-4">
+            <span className="text-xs opacity-70">Cashier: {cashierPin}</span>
+            <button
+              onClick={handleLogout}
+              className="px-3 py-1.5 rounded-xl border border-rose-400/40 text-rose-300 hover:bg-rose-500/10"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+
+        <div className="h-[calc(100%-2.5rem)] flex gap-4">
           {/* LEFT */}
-          <section className="flex-1 min-w-0 rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-4 shadow-xl flex flex-col">
+          <section
+            className={`${showCart ? "flex-1" : "w-full"} min-w-0 rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-4 shadow-xl flex flex-col`}
+          >
             {/* Tabs */}
             <div className="flex flex-wrap gap-2">
               {categories.map((cat) => {
@@ -189,8 +255,11 @@ export default function POS() {
                         ← Back to Functions
                       </button>
                     </div>
+
                     <ProductManager
                       products={products}
+                      categories={baseCategories}
+                      onCategoriesChange={handleCategoriesChange}
                       onAdd={addProduct}
                       onUpdate={updateProduct}
                       onDelete={deleteProduct}
@@ -198,21 +267,18 @@ export default function POS() {
                   </>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3">
-                    {functionButtons.map((btn) => (
-                      <button
-                        key={btn.action}
-                        onClick={() => {
-                          if (btn.action === "manageProducts") setShowProductManager(true);
-                          else if (btn.action === "openReports") navigate("/reports");
-                          else if (btn.action === "reprintReceipt") handleReprintLastReceipt();
-                          else if (btn.action === "dailyRevenue") console.log("Daily revenue…");
-                          else console.log("Function:", btn.action);
-                        }}
-                        className="h-16 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 text-left font-medium shadow transition"
-                      >
-                        {btn.label}
-                      </button>
-                    ))}
+                    <button
+                      onClick={requestAdmin}
+                      className="h-16 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 text-left font-medium shadow transition"
+                    >
+                      Admin
+                    </button>
+                    <button
+                      onClick={handleReprintLastReceipt}
+                      className="h-16 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 text-left font-medium shadow transition"
+                    >
+                      Reprint Last Receipt
+                    </button>
                   </div>
                 )
               ) : (
@@ -236,127 +302,124 @@ export default function POS() {
           </section>
 
           {/* RIGHT: Cart */}
-          <aside className="w-[420px] rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-4 shadow-xl flex flex-col">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-2xl">🛒</span>
-              <h2 className="text-xl font-bold">Cart</h2>
-            </div>
+          {showCart && (
+            <aside className="w-[420px] rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-4 shadow-xl flex flex-col">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-2xl">🛒</span>
+                <h2 className="text-xl font-bold">Cart</h2>
+              </div>
 
-            {/* Items */}
-            <div className="space-y-2 overflow-auto pr-1" style={{ maxHeight: "calc(100vh - 240px)" }}>
-              {cart.length === 0 && <p className="text-sm text-gray-400">Cart is empty.</p>}
-              {cart.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 p-3"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">{item.name}</p>
-                    <p className="text-[11px] text-gray-400">{item.price.toFixed(2)} TND</p>
-                  </div>
+              <div className="space-y-2 overflow-auto pr-1" style={{ maxHeight: "calc(100vh - 240px)" }}>
+                {cart.length === 0 && <p className="text-sm text-gray-400">Cart is empty.</p>}
+                {cart.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 p-3"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{item.name}</p>
+                      <p className="text-[11px] text-gray-400">{item.price.toFixed(2)} TND</p>
+                    </div>
 
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => handleDecrement(item.id)}
-                      className="px-3 h-8 rounded-full border border-white/15 hover:bg-white/10"
-                    >
-                      –
-                    </button>
-                    <span className="w-8 text-center select-none text-sm">{item.quantity}</span>
-                    <button
-                      onClick={() => handleIncrement(item.id)}
-                      className="px-3 h-8 rounded-full border border-white/15 hover:bg-white/10"
-                    >
-                      +
-                    </button>
-                  </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleDecrement(item.id)}
+                        className="px-3 h-8 rounded-full border border-white/15 hover:bg-white/10"
+                      >
+                        –
+                      </button>
+                      <span className="w-8 text-center select-none text-sm">{item.quantity}</span>
+                      <button
+                        onClick={() => handleIncrement(item.id)}
+                        className="px-3 h-8 rounded-full border border-white/15 hover:bg-white/10"
+                      >
+                        +
+                      </button>
+                    </div>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleRemoveItem(item.id)}
-                      className="px-2 h-8 text-xs rounded-full border border-rose-400/40 text-rose-300 hover:bg-rose-500/10"
-                      title="Remove"
-                    >
-                      ✕
-                    </button>
-                    <div className="w-20 text-right font-semibold">
-                      {(item.price * item.quantity).toFixed(2)}
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleRemoveItem(item.id)}
+                        className="px-2 h-8 text-xs rounded-full border border-rose-400/40 text-rose-300 hover:bg-rose-500/10"
+                        title="Remove"
+                      >
+                        ✕
+                      </button>
+                      <div className="w-20 text-right font-semibold">
+                        {(item.price * item.quantity).toFixed(2)}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
 
-            {/* Footer */}
-            <div className="mt-4 pt-3 border-t border-white/10">
-              <div className="flex items-center gap-2">
-                <span className="text-sm opacity-80">Discount:</span>
-                <div className="flex rounded-xl overflow-hidden border border-white/12">
+              <div className="mt-4 pt-3 border-t border-white/10">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm opacity-80">Discount:</span>
+                  <div className="flex rounded-xl overflow-hidden border border-white/12">
+                    <button
+                      onClick={() => setDiscountPercent(0.1)}
+                      className={`px-3 py-1 text-sm border-r border-white/10 ${
+                        discountPercent === 0.1 ? "bg-emerald-400/15" : "hover:bg-white/10"
+                      }`}
+                    >
+                      10%
+                    </button>
+                    <button
+                      onClick={() => setDiscountPercent(0.25)}
+                      className={`px-3 py-1 text-sm ${
+                        discountPercent === 0.25 ? "bg-emerald-400/15" : "hover:bg-white/10"
+                      }`}
+                    >
+                      25%
+                    </button>
+                  </div>
                   <button
-                    onClick={() => setDiscountPercent(0.1)}
-                    className={`px-3 py-1 text-sm border-r border-white/10 ${
-                      discountPercent === 0.1 ? "bg-emerald-400/15" : "hover:bg-white/10"
-                    }`}
+                    onClick={() => setDiscountPercent(0)}
+                    className="ml-auto px-3 py-1 text-xs rounded-xl border border-white/15 hover:bg-white/10"
                   >
-                    10%
+                    Reset
+                  </button>
+                </div>
+
+                <div className="mt-3 space-y-1 text-sm">
+                  <div className="flex justify-between opacity-80">
+                    <span>Subtotal</span>
+                    <span>{subtotal.toFixed(2)} TND</span>
+                  </div>
+                  <div className="flex justify-between opacity-80">
+                    <span>Discount{discountPercent ? ` (${Math.round(discountPercent * 100)}%)` : ""}</span>
+                    <span>-{discountValue.toFixed(2)} TND</span>
+                  </div>
+                  <div className="flex justify-between text-base font-semibold pt-2 border-t border-white/10">
+                    <span>Total</span>
+                    <span>{totalWithDiscount.toFixed(2)} TND</span>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <button
+                    onClick={handleClearCart}
+                    className="py-2 rounded-xl border border-rose-400/40 text-rose-300 hover:bg-rose-500/10"
+                  >
+                    Clear
                   </button>
                   <button
-                    onClick={() => setDiscountPercent(0.25)}
-                    className={`px-3 py-1 text-sm ${
-                      discountPercent === 0.25 ? "bg-emerald-400/15" : "hover:bg-white/10"
-                    }`}
+                    onClick={() => handlePayment("CASH")}
+                    className="py-2 rounded-xl border border-white/15 hover:bg-white/10"
                   >
-                    25%
+                    CASH
+                  </button>
+                  <button
+                    onClick={() => handlePayment("CARD")}
+                    className="py-2 rounded-xl border border-white/15 hover:bg-white/10"
+                  >
+                    CARD
                   </button>
                 </div>
-                <button
-                  onClick={() => setDiscountPercent(0)}
-                  className="ml-auto px-3 py-1 text-xs rounded-xl border border-white/15 hover:bg-white/10"
-                >
-                  Reset
-                </button>
               </div>
-
-              <div className="mt-3 space-y-1 text-sm">
-                <div className="flex justify-between opacity-80">
-                  <span>Subtotal</span>
-                  <span>{subtotal.toFixed(2)} TND</span>
-                </div>
-                <div className="flex justify-between opacity-80">
-                  <span>
-                    Discount{discountPercent ? ` (${Math.round(discountPercent * 100)}%)` : ""}
-                  </span>
-                  <span>-{discountValue.toFixed(2)} TND</span>
-                </div>
-                <div className="flex justify-between text-base font-semibold pt-2 border-t border-white/10">
-                  <span>Total</span>
-                  <span>{totalWithDiscount.toFixed(2)} TND</span>
-                </div>
-              </div>
-
-              {/* Actions: Clear + Payment */}
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                <button
-                  onClick={handleClearCart}
-                  className="py-2 rounded-xl border border-rose-400/40 text-rose-300 hover:bg-rose-500/10"
-                >
-                  Clear
-                </button>
-                <button
-                  onClick={() => handlePayment("CASH")}
-                  className="py-2 rounded-xl border border-white/15 hover:bg-white/10"
-                >
-                  CASH
-                </button>
-                <button
-                  onClick={() => handlePayment("CARD")}
-                  className="py-2 rounded-xl border border-white/15 hover:bg-white/10"
-                >
-                  CARD
-                </button>
-              </div>
-            </div>
-          </aside>
+            </aside>
+          )}
         </div>
       </div>
     </div>
