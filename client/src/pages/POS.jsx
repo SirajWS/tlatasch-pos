@@ -1,188 +1,322 @@
 // src/pages/POS.jsx
-import React, { useState } from 'react';
-import FunctionsList from "../components/FunctionsList";
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import ProductManager from "../components/ProductManager";
+import { addSale } from "../data/salesStore";
 
-const categories = ['Food', 'Drinks', 'Menus', 'Functions'];
+const STORAGE_KEY = "tlatasch_products";
 
-const products = [
-  // Food
-  { name: 'Chapati Normal', price: 7, category: 'Food' },
-  { name: 'Double Egg', price: 8, category: 'Food' },
-  { name: 'Mozzarella', price: 9, category: 'Food' },
-  { name: 'Jambon & Pepperoni', price: 9, category: 'Food' },
-  { name: '4 Fromage', price: 4.6, category: 'Food' },
-  { name: 'Escalope', price: 10, category: 'Food' },
-
-  // Drinks
-  { name: 'Cola', price: 2.5, category: 'Drinks' },
-  { name: 'Fanta', price: 2.5, category: 'Drinks' },
-  { name: 'Delio', price: 2, category: 'Drinks' },
-  { name: 'Jus', price: 2, category: 'Drinks' },
-
-  // Menus
-  { name: 'Chapati + Softdrink', price: 5.5, category: 'Menus' },
-  { name: 'Duo 2 Chapati + 2 Softdrinks', price: 10.5, category: 'Menus' },
-  { name: 'Combi 13', price: 50, category: 'Menus' },
-  { name: 'Combi 31', price: 113, category: 'Menus' },
-
-  // Functions (temporary placeholder products)
-  { name: 'Daily Revenue', price: 0, category: 'Functions' },
+const DEFAULT_PRODUCTS = [
+  { id: "p1", name: "Chapati Normal", price: 7, category: "Food", active: true },
+  { id: "p2", name: "Double Egg", price: 8, category: "Food", active: true },
+  { id: "p3", name: "Mozzarella", price: 9, category: "Food", active: true },
+  { id: "p4", name: "Jambon & Pepperoni", price: 9, category: "Food", active: true },
+  { id: "p5", name: "4 Fromage", price: 4.6, category: "Food", active: true },
+  { id: "p6", name: "Escalope", price: 10, category: "Food", active: true },
+  { id: "p7", name: "Cola", price: 2.5, category: "Drinks", active: true },
+  { id: "p8", name: "Fanta", price: 2.5, category: "Drinks", active: true },
+  { id: "p9", name: "Delio", price: 2, category: "Drinks", active: true },
+  { id: "p10", name: "Jus", price: 2, category: "Drinks", active: true },
+  { id: "p11", name: "Chapati + Softdrink", price: 5.5, category: "Menus", active: true },
+  { id: "p12", name: "Duo 2 Chapati + 2 Softdrinks", price: 10.5, category: "Menus", active: true },
+  { id: "p13", name: "Combi 13", price: 50, category: "Menus", active: true },
+  { id: "p14", name: "Combi 31", price: 113, category: "Menus", active: true },
 ];
 
+const categories = ["Food", "Drinks", "Menus", "Functions"];
+
 export default function POS() {
-  const [activeCategory, setActiveCategory] = useState('Food');
+  const navigate = useNavigate();
+  const [activeCategory, setActiveCategory] = useState("Food");
+  const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
-  const [discount, setDiscount] = useState(0);
+  const [discountPercent, setDiscountPercent] = useState(0);
+  const [showProductManager, setShowProductManager] = useState(false);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      try {
+        setProducts(JSON.parse(raw));
+      } catch {
+        setProducts(DEFAULT_PRODUCTS);
+      }
+    } else {
+      setProducts(DEFAULT_PRODUCTS);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_PRODUCTS));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (products && products.length >= 0) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
+    }
+  }, [products]);
+
+  const functionButtons = [
+    { label: "Products: Add / Edit / Delete", action: "manageProducts" },
+    { label: "Open Reports", action: "openReports" },
+    { label: "💾 Add Demo Sale", action: "demoSale" },
+    { label: "Change Payment Method", action: "changePayment" },
+    { label: "Show Daily Revenue", action: "dailyRevenue" },
+    { label: "Reprint Last Receipt", action: "reprintReceipt" },
+  ];
+
+  const addProduct = (p) => setProducts((prev) => [...prev, p]);
+  const updateProduct = (p) => setProducts((prev) => prev.map((x) => (x.id === p.id ? p : x)));
+  const deleteProduct = (id) => setProducts((prev) => prev.filter((x) => x.id !== id));
+
+  const visibleProducts = products.filter(
+    (p) => p.category === activeCategory && p.active !== false
+  );
 
   const handleProductClick = (product) => {
-    const exists = cart.find((item) => item.name === product.name);
+    const exists = cart.find((i) => i.id === product.id);
     if (exists) {
-      setCart(
-        cart.map((item) =>
-          item.name === product.name
-            ? { ...item, quantity: item.quantity + 1 }
-            : item
-        )
-      );
+      setCart(cart.map((i) => (i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i)));
     } else {
-      setCart([...cart, { ...product, quantity: 1 }]);
+      setCart([...cart, { id: product.id, name: product.name, price: product.price, quantity: 1 }]);
     }
   };
 
-  const handleRemoveItem = (name) => {
-    setCart(cart.filter((item) => item.name !== name));
+  const handleIncrement = (id) =>
+    setCart(cart.map((i) => (i.id === id ? { ...i, quantity: i.quantity + 1 } : i)));
+
+  const handleDecrement = (id) =>
+    setCart(
+      cart
+        .map((i) => (i.id === id ? { ...i, quantity: Math.max(0, i.quantity - 1) } : i))
+        .filter((i) => i.quantity > 0)
+    );
+
+  const handleRemoveItem = (id) => setCart(cart.filter((i) => i.id !== id));
+
+  const subtotal = cart.reduce((s, i) => s + i.price * i.quantity, 0);
+  const discountValue = subtotal * discountPercent;
+  const totalWithDiscount = Math.max(0, subtotal - discountValue).toFixed(2);
+
+  useEffect(() => {
+    if (activeCategory !== "Functions" && showProductManager) {
+      setShowProductManager(false);
+    }
+  }, [activeCategory, showProductManager]);
+
+  // 🔹 Demo-Sale Funktion
+  const addDemoSale = () => {
+    addSale({
+      timestamp: Date.now(),
+      cashierPin: "000001",
+      payment: "CASH",
+      items: [
+        { id: "p1", name: "Chapati Normal", price: 7, qty: 2 },
+        { id: "p7", name: "Cola", price: 2.5, qty: 1 },
+      ],
+      subtotal: 16.5,
+      discountPercent: 0.1,
+      discountValue: 1.65,
+      total: 14.85,
+    });
+    alert("Demo-Sale gespeichert. Öffne Reports!");
   };
 
-  const total = cart.reduce(
-    (sum, item) => sum + item.price * item.quantity,
-    0
-  );
-
-  const totalWithDiscount = Math.max(0, total - discount).toFixed(2);
-  
-
-  const handleFunctionAction = (action) => {
-  switch (action) {
-    case "changePayment":
-      console.log("Changing payment method...");
-      break;
-    case "dailyRevenue":
-      console.log("Showing daily revenue...");
-      break;
-    case "reprintReceipt":
-      console.log("Reprinting last receipt...");
-      break;
-    default:
-      console.warn("Unknown function:", action);
-  }
-};
-
-
   return (
-    <div className="flex h-screen p-4 gap-4 bg-gray-100">
-      {/* Left side: Categories & Products */}
-      <div className="w-2/3 flex flex-col gap-4">
-        <div className="flex gap-2">
-          {categories.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={`px-4 py-2 rounded font-semibold text-white ${
-                activeCategory === cat ? 'bg-blue-700' : 'bg-blue-500'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
+    <div className="h-screen w-screen overflow-hidden bg-neutral-950 text-gray-100">
+      <div className="h-full p-4">
+        <div className="h-full flex gap-4">
+          {/* LEFT: Products / Functions */}
+          <section className="flex-1 min-w-0 rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-4 shadow-xl flex flex-col">
+            {/* Tabs */}
+            <div className="flex flex-wrap gap-2">
+              {categories.map((cat) => {
+                const active = activeCategory === cat;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => setActiveCategory(cat)}
+                    className={`px-4 py-2 rounded-xl font-medium transition border
+                      ${active
+                        ? "border-emerald-400 text-emerald-300 bg-emerald-400/10"
+                        : "border-white/15 hover:bg-white/10"}`}
+                  >
+                    {cat}
+                  </button>
+                );
+              })}
+            </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          {activeCategory === "Functions" ? (
-  <FunctionsList onAction={handleFunctionAction} />
-) : (
-  products
-    .filter((p) => p.category === activeCategory)
-    .map((product) => (
-      <button
-        key={product.name}
-        onClick={() => handleProductClick(product)}
-        className="bg-blue-500 hover:bg-blue-600 text-white p-4 rounded text-lg font-medium"
-      >
-        {product.name}
-      </button>
-    ))
-      )}
+            <div className="my-3 h-px bg-white/10" />
 
-        </div>
-      </div>
+            {/* Body */}
+            <div className="flex-1 overflow-auto">
+              {activeCategory === "Functions" ? (
+                showProductManager ? (
+                  <>
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="text-sm opacity-80">Product Manager</div>
+                      <button
+                        onClick={() => setShowProductManager(false)}
+                        className="px-3 py-1 rounded-xl border border-white/15 hover:bg-white/10"
+                      >
+                        ← Back to Functions
+                      </button>
+                    </div>
+                    <ProductManager
+                      products={products}
+                      onAdd={addProduct}
+                      onUpdate={updateProduct}
+                      onDelete={deleteProduct}
+                    />
+                  </>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3">
+                    {functionButtons.map((btn) => (
+                      <button
+                        key={btn.action}
+                        onClick={() => {
+                          if (btn.action === "manageProducts") {
+                            setShowProductManager(true);
+                          } else if (btn.action === "openReports") {
+                            navigate("/reports");
+                          } else if (btn.action === "demoSale") {
+                            addDemoSale(); // jetzt richtig eingebaut
+                          } else {
+                            console.log("Function:", btn.action);
+                          }
+                        }}
+                        className="h-16 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10
+                                   px-4 text-left font-medium shadow transition"
+                      >
+                        {btn.label}
+                      </button>
+                    ))}
+                  </div>
+                )
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {visibleProducts.map((product) => (
+                    <button
+                      key={product.id}
+                      onClick={() => handleProductClick(product)}
+                      className="group h-24 text-left rounded-2xl border border-white/10
+                                 bg-white/5 hover:bg-white/10 p-3 shadow transition hover:-translate-y-0.5"
+                    >
+                      <div className="font-semibold leading-tight truncate">{product.name}</div>
+                      <div className="text-sm opacity-80 mt-1">{product.price.toFixed(2)} TND</div>
+                      <div className="mt-2 text-[11px] opacity-0 group-hover:opacity-70 transition">
+                        Tap to add →
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
 
-      {/* Right side: Cart */}
-      <div className="w-1/3 bg-white p-4 rounded shadow flex flex-col justify-between">
-        <div>
-          <h2 className="text-xl font-bold mb-4">🛒 Cart</h2>
-          {cart.map((item) => (
-            <div
-              key={item.name}
-              className="flex justify-between items-center mb-2"
-            >
-              <div className="flex flex-col">
-                <span>
-                  {item.name} × {item.quantity}
-                </span>
-                <span className="text-sm text-gray-500">
-                  Unit: {item.price.toFixed(2)} TND
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span>{(item.price * item.quantity).toFixed(2)} TND</span>
-                <button
-                  onClick={() => handleRemoveItem(item.name)}
-                  className="text-red-500 font-bold px-2"
-                  title="Remove"
+          {/* RIGHT: Cart */}
+          <aside className="w-[420px] rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-4 shadow-xl flex flex-col">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-2xl">🛒</span>
+              <h2 className="text-xl font-bold">Cart</h2>
+            </div>
+
+            <div className="space-y-2 overflow-auto pr-1" style={{ maxHeight: "calc(100vh - 240px)" }}>
+              {cart.length === 0 && <p className="text-sm text-gray-400">Cart is empty.</p>}
+              {cart.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 p-3"
                 >
-                  ✕
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{item.name}</p>
+                    <p className="text-[11px] text-gray-400">{item.price.toFixed(2)} TND</p>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleDecrement(item.id)}
+                      className="px-3 h-8 rounded-full border border-white/15 hover:bg-white/10"
+                    >
+                      –
+                    </button>
+                    <span className="w-8 text-center select-none text-sm">{item.quantity}</span>
+                    <button
+                      onClick={() => handleIncrement(item.id)}
+                      className="px-3 h-8 rounded-full border border-white/15 hover:bg-white/10"
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleRemoveItem(item.id)}
+                      className="px-2 h-8 text-xs rounded-full border border-rose-400/40 text-rose-300 hover:bg-rose-500/10"
+                    >
+                      ✕
+                    </button>
+                    <div className="w-20 text-right font-semibold">
+                      {(item.price * item.quantity).toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Footer */}
+            <div className="mt-4 pt-3 border-t border-white/10">
+              <div className="flex items-center gap-2">
+                <span className="text-sm opacity-80">Discount:</span>
+                <div className="flex rounded-xl overflow-hidden border border-white/12">
+                  <button
+                    onClick={() => setDiscountPercent(0.1)}
+                    className={`px-3 py-1 text-sm border-r border-white/10 ${
+                      discountPercent === 0.1 ? "bg-emerald-400/15" : "hover:bg-white/10"
+                    }`}
+                  >
+                    10%
+                  </button>
+                  <button
+                    onClick={() => setDiscountPercent(0.25)}
+                    className={`px-3 py-1 text-sm ${
+                      discountPercent === 0.25 ? "bg-emerald-400/15" : "hover:bg-white/10"
+                    }`}
+                  >
+                    25%
+                  </button>
+                </div>
+                <button
+                  onClick={() => setDiscountPercent(0)}
+                  className="ml-auto px-3 py-1 text-xs rounded-xl border border-white/15 hover:bg-white/10"
+                >
+                  Reset
                 </button>
               </div>
+
+              <div className="mt-3 space-y-1 text-sm">
+                <div className="flex justify-between opacity-80">
+                  <span>Subtotal</span>
+                  <span>{subtotal.toFixed(2)} TND</span>
+                </div>
+                <div className="flex justify-between opacity-80">
+                  <span>
+                    Discount{discountPercent ? ` (${Math.round(discountPercent * 100)}%)` : ""}
+                  </span>
+                  <span>-{discountValue.toFixed(2)} TND</span>
+                </div>
+                <div className="flex justify-between text-base font-semibold pt-2 border-t border-white/10">
+                  <span>Total</span>
+                  <span>{totalWithDiscount} TND</span>
+                </div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button className="py-2 rounded-xl border border-white/15 hover:bg-white/10">CASH</button>
+                <button className="py-2 rounded-xl border border-white/15 hover:bg-white/10">CARD</button>
+              </div>
             </div>
-          ))}
-        </div>
-
-        {/* Discount + Total */}
-        <div className="mt-4 border-t pt-4">
-          <label className="block mb-2 font-medium">
-            🎟 Discount (TND):
-            <input
-              type="number"
-              value={discount}
-              onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
-              className="w-full mt-1 p-2 border rounded"
-              min="0"
-              step="0.1"
-            />
-          </label>
-
-          <div className="flex justify-between font-bold text-lg my-4">
-            <span>Total:</span>
-            <span>{totalWithDiscount} TND</span>
-          </div>
-
-          <div className="flex gap-4">
-            <button className="w-1/2 bg-gray-800 text-white py-2 rounded">
-              CASH
-            </button>
-            <button className="w-1/2 bg-gray-600 text-white py-2 rounded">
-              CARD
-            </button>
-          </div>
+          </aside>
         </div>
       </div>
     </div>
   );
 }
-
-
-
-
-
-
-
