@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import ProductManager from "../components/ProductManager";
 import { addSale, getSales } from "../data/salesStore";
+import AdminPinModal from "../components/AdminPinModal";
 
 const STORAGE_PRODUCTS = "tlatasch_products";
 const STORAGE_CATEGORIES = "tlatasch_categories";
@@ -28,15 +29,28 @@ export default function POS() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Products & categories
   const [products, setProducts] = useState([]);
-  const [baseCategories, setBaseCategories] = useState([]); // ohne "Functions"
+  const [baseCategories, setBaseCategories] = useState([]);
   const [activeCategory, setActiveCategory] = useState("Food");
 
+  // Cart & discounts
   const [cart, setCart] = useState([]);
   const [discountPercent, setDiscountPercent] = useState(0);
-  const [showProductManager, setShowProductManager] = useState(false);
 
+  // UI state
+  const [showProductManager, setShowProductManager] = useState(false);
+  const [showAdminModal, setShowAdminModal] = useState(false);
+
+  // Session
   const cashierPin = localStorage.getItem("cashierPin") || "000001";
+
+  // Ensure default admin pin exists
+  useEffect(() => {
+    if (!localStorage.getItem("adminPin")) {
+      localStorage.setItem("adminPin", "999999");
+    }
+  }, []);
 
   // Load products
   useEffect(() => {
@@ -73,13 +87,12 @@ export default function POS() {
         }
       } catch {}
     }
-    // Fallback defaults
-    const defaults = ["Food", "Drinks", "Menus"];
+    const defaults = ["Food", "Drinks", "Menus", "Others"];
     setBaseCategories(defaults);
     localStorage.setItem(STORAGE_CATEGORIES, JSON.stringify(defaults));
   }, []);
 
-  // When returning from AdminPanel wanting PM directly
+  // Coming back from admin to open ProductManager directly
   useEffect(() => {
     if (location.state?.openProductManager) {
       setActiveCategory("Functions");
@@ -88,24 +101,17 @@ export default function POS() {
     }
   }, [location, navigate]);
 
-  // Tabs = categories + Functions
+  // Tabs incl. Functions
   const categories = [...baseCategories, "Functions"];
-
-  const functionButtons = [
-    { label: "Admin", action: "admin" },
-    { label: "Reprint Last Receipt", action: "reprintReceipt" },
-  ];
 
   // CRUD
   const addProduct = (p) => setProducts((prev) => [...prev, p]);
   const updateProduct = (p) => setProducts((prev) => prev.map((x) => (x.id === p.id ? p : x)));
   const deleteProduct = (id) => setProducts((prev) => prev.filter((x) => x.id !== id));
 
-  // Categories change (from ProductManager)
   const handleCategoriesChange = (list) => {
     setBaseCategories(list);
     localStorage.setItem(STORAGE_CATEGORIES, JSON.stringify(list));
-    // if current active no longer exists, switch
     if (!list.includes(activeCategory) && activeCategory !== "Functions") {
       setActiveCategory(list[0] || "Functions");
     }
@@ -140,16 +146,11 @@ export default function POS() {
   const discountValue = subtotal * discountPercent;
   const totalWithDiscount = Math.max(0, subtotal - discountValue);
 
-  // Admin with PIN
-  const requestAdmin = () => {
-    const expected = localStorage.getItem("adminPin") || "999999";
-    const pin = prompt("Enter admin PIN:");
-    if (!pin) return;
-    if (pin === expected) navigate("/admin");
-    else alert("Invalid PIN!");
-  };
+  // Admin flow
+  const openAdmin = () => setShowAdminModal(true);
+  const handleAdminSuccess = () => navigate("/admin");
 
-  // Payment
+  // Payments
   const handlePayment = (method) => {
     if (cart.length === 0) {
       alert("Cart is empty!");
@@ -189,12 +190,12 @@ export default function POS() {
     navigate("/");
   };
 
-  // Auto-close PM when leaving Function tab
+  // Close PM if leaving Functions
   useEffect(() => {
     if (activeCategory !== "Functions" && showProductManager) setShowProductManager(false);
   }, [activeCategory, showProductManager]);
 
-  // Hide cart when Product Manager open
+  // Hide cart when ProductManager open
   const showCart = !(activeCategory === "Functions" && showProductManager);
 
   return (
@@ -216,9 +217,7 @@ export default function POS() {
 
         <div className="h-[calc(100%-2.5rem)] flex gap-4">
           {/* LEFT */}
-          <section
-            className={`${showCart ? "flex-1" : "w-full"} min-w-0 rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-4 shadow-xl flex flex-col`}
-          >
+          <section className={`${showCart ? "flex-1" : "w-full"} min-w-0 rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-4 shadow-xl flex flex-col relative z-10`}>
             {/* Tabs */}
             <div className="flex flex-wrap gap-2">
               {categories.map((cat) => {
@@ -266,19 +265,22 @@ export default function POS() {
                     />
                   </>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3">
-                    <button
-                      onClick={requestAdmin}
-                      className="h-16 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 text-left font-medium shadow transition"
-                    >
-                      Admin
-                    </button>
-                    <button
-                      onClick={handleReprintLastReceipt}
-                      className="h-16 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 text-left font-medium shadow transition"
-                    >
-                      Reprint Last Receipt
-                    </button>
+                  // Klickbarer Functions-Layer
+                  <div className="relative z-20 pointer-events-auto">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openAdmin(); }}
+                        className="relative z-30 pointer-events-auto h-16 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 text-left font-medium shadow transition"
+                      >
+                        Admin
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleReprintLastReceipt(); }}
+                        className="relative z-30 pointer-events-auto h-16 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 text-left font-medium shadow transition"
+                      >
+                        Reprint Last Receipt
+                      </button>
+                    </div>
                   </div>
                 )
               ) : (
@@ -422,8 +424,13 @@ export default function POS() {
           )}
         </div>
       </div>
+
+      {/* Admin PIN modal (global, außerhalb Layout) */}
+      <AdminPinModal
+        open={showAdminModal}
+        onClose={() => setShowAdminModal(false)}
+        onSuccess={handleAdminSuccess}
+      />
     </div>
   );
 }
-
-
